@@ -1,0 +1,13 @@
+[project]
+name = "iceberg-append"
+version = "0.1.0"
+description = "Append dict records through an Iceberg catalog, reloading after a commit conflict."
+requires-python = ">=3.10"
+dependencies = ["pyiceberg>=0.9", "pyarrow"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

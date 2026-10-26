@@ -1,0 +1,7 @@
+.git
+.venv
+__pycache__/
+.astro/standalone/
+logs/
+airflow.cfg
+airflow.db
