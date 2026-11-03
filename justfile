@@ -3,7 +3,7 @@ set shell := ["bash", "-cu"]
 default:
     @just --list
 
-# SQLite catalog, file warehouse, four scenarios. Creates .venv on first run.
+# SQLite catalog, file warehouse, local scenarios. Creates .venv on first run.
 check:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -13,8 +13,9 @@ check:
     fi
     .venv/bin/python scripts/demo.py
 
+# First boot builds the runtime image and may take a few minutes.
 up:
-    astro dev start --no-browser
+    astro dev start --no-browser --wait 5m
 
 task:
     #!/usr/bin/env bash
