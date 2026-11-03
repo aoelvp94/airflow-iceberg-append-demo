@@ -1,19 +1,20 @@
 # Append to an Iceberg table from Airflow
 
-A local reproduction of a gap in `apache-airflow-providers-apache-iceberg`:
-`IcebergHook` can load a table, its schema, and its snapshots. It has no
-method that adds rows.
+A local reproduction of
+[apache/airflow#76338](https://github.com/apache/airflow/issues/76338) /
+[PR #76342](https://github.com/apache/airflow/pull/76342): `IcebergHook` can
+load a table, its schema, and its snapshots. It has no method that adds rows.
 
 `just check` uses a SQLite catalog and a file warehouse under a temp directory.
-No AWS, no REST catalog, no Airflow. `just e2e` runs the same four checks as
-an Airflow task.
+No AWS, no REST catalog, no Airflow. `just e2e` runs the same checks as an
+Airflow task.
 
 ```
 today                                         this demo
 
 hook.load_table("demo.events")                append_records(catalog, "demo.events", rows)
 hook.get_table_schema(...)                    Arrow schema taken from the table
-hook.get_snapshots(...)                       unknown keys dropped
+hook.get_snapshots(...)                       unknown keys / extra columns dropped
 you build the catalog client yourself         CommitFailedException reloads and retries
 ```
 
@@ -22,14 +23,19 @@ refreshes that table object. The table in the conflict scenario sets
 `commit.retry.num-retries` to `0`, so a stale handle raises
 `CommitFailedException` instead of hiding it. `append_records` then loads the
 table again and writes. That reload is the part a hook method has to do when
-the caller is holding a snapshot from before someone else committed.
+the caller is holding a snapshot from before someone else committed. There is
+no sleep or exponential backoff between attempts.
 
-Records are passed as dicts. `pyarrow.Table.from_pylist` is called with the
-table's Arrow schema, so a key the table does not have yet is left out of the
-file. Adding the column later does not require the writer to change first.
+`records` may be a `list[dict]` or a `pyarrow.Table`. Dicts go through
+`pyarrow.Table.from_pylist(..., schema=table.schema().as_arrow())`. A
+`pa.Table` is `select`ed to known columns and `cast` to the table schema. A
+key or column the table does not have yet is left out of the file. Adding the
+column later does not require the writer to change first.
 
-Use a `pa.Table`, not a `RecordBatchReader`. The reader is consumed by the
-first attempt, so a retry would append no rows.
+Use a `list[dict]` or a `pa.Table`, not a `RecordBatchReader`. The reader is
+consumed by the first attempt, so a retry would append no rows. Table names
+must be fully qualified (`namespace.table`). `retries` defaults to 8 and must
+be at least 1.
 
 ## Reproduce
 
@@ -45,10 +51,13 @@ Sample output:
 ```
   append            pass  read back [{'id': 1, 'name': 'alpha'}, {'id': 2, 'name': 'beta'}]
   unknown key       pass  stored {'id': 3, 'name': 'gamma'}
+  pa.Table          pass  stored {'id': 4, 'name': 'delta'}
+  unqualified name  pass  Expected fully-qualified table name (namespace.table), got: 'events'
+  retries >= 1      pass  retries must be at least 1
   stale append      pass  CommitFailedException after another writer committed (table retry count is 0)
   reload and retry  pass  both writers present: [{'id': 1, 'name': 'first'}, {'id': 2, 'name': 'second'}]
 
-all 4 scenarios passed
+all 7 scenarios passed
 ```
 
 ## The same checks inside Airflow
@@ -71,10 +80,13 @@ task and are deleted when it finishes. The UI is at http://localhost:8080.
 
 A method on
 [`IcebergHook`](https://github.com/apache/airflow/blob/main/providers/apache/iceberg/src/airflow/providers/apache/iceberg/hooks/iceberg.py),
-next to `load_table`:
+next to `load_table`, as proposed in
+[apache/airflow#76342](https://github.com/apache/airflow/pull/76342)
+([issue #76338](https://github.com/apache/airflow/issues/76338)):
 
 ```python
 IcebergHook().append("demo.events", [{"id": 1, "name": "alpha"}])
+IcebergHook().append("demo.events", pa.table({"id": [2], "name": ["beta"]}))
 ```
 
 The catalog is the one the hook already builds from the connection. This repo
@@ -84,7 +96,7 @@ points that call at SQLite so a reviewer can run it without a catalog service.
 ## Layout
 
 ```
-iceberg_pkg/          append_records and the four scenarios
+iceberg_pkg/          append_records and the local scenarios
 scripts/demo.py       local entry point
 dags/iceberg_append_demo.py
 ```

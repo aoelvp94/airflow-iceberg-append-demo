@@ -1,4 +1,4 @@
-"""The four local scenarios. Shared by ``scripts/demo.py`` and the DAG."""
+"""Local scenarios shared by ``scripts/demo.py`` and the DAG."""
 
 from __future__ import annotations
 
@@ -28,6 +28,9 @@ def run(directory: Path) -> list[dict]:
     return [
         _append_and_read(catalog),
         _extra_key_dropped(catalog),
+        _append_arrow_table(catalog),
+        _unqualified_name_rejected(catalog),
+        _retries_must_be_at_least_one(catalog),
         _stale_handle_raises(catalog),
         _reload_after_conflict(catalog),
     ]
@@ -64,6 +67,33 @@ def _extra_key_dropped(catalog) -> dict:
     stored = next(row for row in rows if row["id"] == 3)
     ok = stored == {"id": 3, "name": "gamma"} and "note" not in stored
     return {"name": "unknown key", "ok": ok, "detail": f"stored {stored}"}
+
+
+def _append_arrow_table(catalog) -> dict:
+    src = pa.table({"id": [4], "name": ["delta"], "extra": ["not a column yet"]})
+    append_records(catalog, "demo.events", src)
+    rows = _scan(catalog, "demo.events")
+    stored = next(row for row in rows if row["id"] == 4)
+    ok = stored == {"id": 4, "name": "delta"} and "extra" not in stored
+    return {"name": "pa.Table", "ok": ok, "detail": f"stored {stored}"}
+
+
+def _unqualified_name_rejected(catalog) -> dict:
+    try:
+        append_records(catalog, "events", [{"id": 99, "name": "nope"}])
+    except ValueError as error:
+        ok = "namespace.table" in str(error)
+        return {"name": "unqualified name", "ok": ok, "detail": str(error)}
+    return {"name": "unqualified name", "ok": False, "detail": "bare table name was accepted"}
+
+
+def _retries_must_be_at_least_one(catalog) -> dict:
+    try:
+        append_records(catalog, "demo.events", [{"id": 1}], retries=0)
+    except ValueError as error:
+        ok = "at least 1" in str(error)
+        return {"name": "retries >= 1", "ok": ok, "detail": str(error)}
+    return {"name": "retries >= 1", "ok": False, "detail": "retries=0 was accepted"}
 
 
 def _stale_handle_raises(catalog) -> dict:
