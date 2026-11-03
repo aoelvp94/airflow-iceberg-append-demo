@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 .venv
+*.egg-info/
 .astro/standalone/
 airflow_settings.yaml
 airflow.cfg
